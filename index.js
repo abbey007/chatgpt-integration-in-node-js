@@ -1,11 +1,24 @@
-import { Configuration, OpenAIApi } from "openai";
-import readline from "readline";
+const readline = require("readline");
+const { getCompletion }  = require("./gpt");
+const messages = [{role: "system", 
+                  content: `It's mandatory to only call 
+                            book_travel function when user input all parameters which are required. 
+                            Dont make assumption or set any default value. 
+                            Ask for [destination, departure, number_people, travel_mode,when].
+                            Call book_travel only when you have [destination, departure, number_people, travel_mode,when] in conversation history and the user has clearly stated they confirm, 
+                            otherwise you must continue interviewing.`}]
+//{role: "system", content: "Your name is Abhijeet's Genie"}
 
-const configuration = new Configuration({
-  organization: "org-o0myWrUdzpEszTerr5SNxgbm",
-  apiKey: "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",
-});
-const openai = new OpenAIApi(configuration);
+var dyn_functions = [];
+dyn_functions['send_email'] = function (args) {
+  return "send email"
+};
+dyn_functions['book_travel'] = function (args) { 
+    // if(args.number_people == '1')
+    //    return { "error" : "invalid number_people" }
+
+    return { data : "Ticket Booked. Details are :"+ JSON.stringify(args) };
+};
 
 const userInterface = readline.createInterface({
   input: process.stdin,
@@ -16,103 +29,56 @@ userInterface.prompt();
 
 userInterface.on("line", async (input) => {
   try{
-      let res =  await getCompletion(input);
-      console.log(res.data.choices[0].message);
+      messages.push({ role: "user", content: input});
+      let res =  await getCompletion(messages);
       if(res.data.choices[0].message.function_call){
-        const fnName = res.data.choices[0].message.function_call.name;
-        const args = res.data.choices[0].message.function_call.arguments;
+
         
-        //fnName(JSON.parse(args));
+        const fnName = res.data.choices[0].message.function_call.name;
+        const args = JSON.parse(res.data.choices[0].message.function_call.arguments);
+        //console.log(`Function call: ${fnName}, Arguments: ${args}`);
 
-        const fn = fnName(JSON.parse(args));
-        const result = await fn(JSON.parse(args));
+          const fn = dyn_functions[fnName]
+          const result = await fn(args);
 
-        console.log(`Function call: ${fnName}, Arguments: ${args}`);
-        console.log(`Calling Function ${fnName} Result: ` + result);
+          console.log(`Calling Function ${fnName} Result: ` + JSON.stringify(result));
 
-        messages.push({
-          role: "assistant",
-          content: "",
-          function_call: {
-            name: fnName,
-            arguments: args,
+          messages.push(
+            {
+            role: "assistant",
+            content: null,
+            function_call: {
+              name: fnName,
+              arguments: JSON.stringify(args),
+            },
           },
-        });
+          {
+            role: "function",
+            name: fnName,
+            content: JSON.stringify(result),
+          });
 
-        messages.push({
-          role: "function",
-          name: fnName,
-          content: JSON.stringify({ result: result }),
-        });
+          res = await getCompletion(messages);
+          console.log(res.data.choices[0].message);
+
+      }else{
+          
+          console.log(res.data.choices[0].message);
+          messages.push({role: "system", content: `It's mandatory to only call 
+          book_travel function when user input all parameters which are required. 
+          Dont make assumption or set any default value. 
+          Ask for [destination, departure, number_people, travel_mode,when].
+          Call book_travel only when you have [destination, departure, number_people, travel_mode,when] in conversation history and the user has clearly stated they confirm,
+          check if date is not the previous date 
+          otherwise you must continue interviewing.`})
+          messages.push({
+            role: "assistant",
+            content: res.data.choices[0].message.content,
+          });
+
       }
       userInterface.prompt();
     }catch(e){
-      console.log(e);
+      console.log(e.response);
     }
 });
-
-const getCompletion = async (messages) => {
-  const response   = await openai
-    .createChatCompletion({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: messages }],
-      temperature : 0,
-      functions: [
-        {
-          "name": "send_email",
-          "description": "Please send an email.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "to_address": {
-                "type": "string",
-                "description": "To address for email"
-              },
-              "subject": {
-                "type": "string",
-                "description": "subject of the email"
-              },
-              "body": {
-                "type": "string",
-                "description": "Body of the email"
-              }
-            }
-          }
-        },
-        {
-          "name": "book_travel",
-          "description": "Book travel",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "destination": {
-                "type": "string",
-                "description": "Your travel destination."
-              },
-              "departute": {
-                "type": "string",
-                "description": "From where are you traveling"
-              },
-              "number_people": {
-                "type": "string",
-                "description": "How many people are traveling"
-              },
-              "travel_mode": {
-                "type": "string",
-                "description": "What mode of travel will it be."
-              }
-            }
-          }
-        }
-      ]
-    })
-    return response;
-};
-
-function send_email(){
-  return "send email"
-}
-
-function book_travel() {
-  return "travel booked"
-}
